@@ -1,0 +1,115 @@
+# ============================================================================
+# SUNA DOCKER COMPOSE - PRODUCTION
+# ============================================================================
+# Configuration de production pour Kortix/Suna
+#
+# ⚠️  IMPORTANT:
+# - Assurez-vous que ENV_MODE=production dans backend/.env
+# - Configurez toutes les variables d'environnement nécessaires
+# - Utilisez des mots de passe forts pour Redis
+# - Configurez SSL/TLS avec Nginx ou un reverse proxy
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yaml up -d
+#   docker compose -f docker-compose.prod.yaml logs -f
+#   docker compose -f docker-compose.prod.yaml down
+# ============================================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass ${REDIS_PASSWORD} --save 60 1 --loglevel warning
+    restart: always
+    networks:
+      - suna-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    image: ghcr.io/suna-ai/suna-backend:latest
+    # OU construire localement :
+    # build:
+    #   context: ./backend
+    #   dockerfile: Dockerfile
+    platform: linux/amd64
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/.env:/app/.env:ro
+    environment:
+      # ⚠️ ENV_MODE est défini dans .env, ne pas override ici en production
+      # Le Dockerfile définit ENV_MODE=production par défaut
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_SSL=False
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - suna-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    image: ghcr.io/suna-ai/suna-backend:latest
+    # OU construire localement :
+    # build:
+    #   context: ./backend
+    #   dockerfile: Dockerfile
+    platform: linux/amd64
+    command: uv run dramatiq --skip-logging --processes 4 --threads 4 run_agent_background
+    volumes:
+      - ./backend/.env:/app/.env:ro
+    environment:
+      # ⚠️ ENV_MODE est défini dans .env, ne pas override ici en production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_SSL=False
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+    networks:
+      - suna-network
+
+  frontend:
+    init: true
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_ENV_MODE=PRODUCTION
+    depends_on:
+      - backend
+    restart: always
+    networks:
+      - suna-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  suna-network:
+    driver: bridge
+

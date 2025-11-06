@@ -313,6 +313,100 @@ async def health_check_docker():
         logger.error(f"Failed health docker check: {e}")
         raise HTTPException(status_code=500, detail="Health check failed")
 
+@api_router.get("/test-bedrock", summary="Test Bedrock Connection", operation_id="test_bedrock", tags=["system"])
+async def test_bedrock_connection():
+    """Test la connexion Bedrock et affiche la configuration"""
+    from core.utils.config import config
+    from core.services.llm import setup_api_keys, setup_provider_router, provider_router
+    import os
+    import litellm
+    from litellm import RateLimitError
+    
+    result = {
+        "config_check": {},
+        "fallback_check": {},
+        "connection_test": {}
+    }
+    
+    # Vérification de la configuration
+    bedrock_token = getattr(config, 'AWS_BEARER_TOKEN_BEDROCK', None) if config else None
+    env_mode = getattr(config, 'ENV_MODE', None) if config else None
+    
+    result["config_check"] = {
+        "env_mode": env_mode,
+        "bedrock_token_configured": bool(bedrock_token),
+        "token_in_environment": bool(os.environ.get("AWS_BEARER_TOKEN_BEDROCK"))
+    }
+    
+    if not bedrock_token:
+        return {
+            "status": "error",
+            "message": "AWS_BEARER_TOKEN_BEDROCK n'est pas configuré",
+            "details": result
+        }
+    
+    # Configuration
+    setup_api_keys()
+    setup_provider_router()
+    
+    # Vérification des fallbacks
+    fallbacks = getattr(provider_router, 'fallbacks', None) if provider_router else None
+    haiku_fallback = None
+    if fallbacks:
+        for fallback in fallbacks:
+            if "anthropic/claude-haiku-4-5" in fallback:
+                haiku_fallback = fallback["anthropic/claude-haiku-4-5"]
+                break
+    
+    result["fallback_check"] = {
+        "total_fallbacks": len(fallbacks) if fallbacks else 0,
+        "haiku_fallback_configured": bool(haiku_fallback),
+        "haiku_fallback_models": haiku_fallback if haiku_fallback else []
+    }
+    
+    # Test de connexion
+    test_model = "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/heol2zyy5v48"
+    try:
+        response = await litellm.acompletion(
+            model=test_model,
+            messages=[{"role": "user", "content": "Réponds uniquement par OK"}],
+            max_tokens=10,
+            temperature=0
+        )
+        content = response.choices[0].message.content.strip()
+        result["connection_test"] = {
+            "status": "success",
+            "model": test_model,
+            "response": content
+        }
+        return {
+            "status": "success",
+            "message": "Bedrock est correctement connecté et fonctionnel",
+            "details": result
+        }
+    except RateLimitError as e:
+        result["connection_test"] = {
+            "status": "rate_limited",
+            "message": "Connexion OK mais rate limit atteint",
+            "error": str(e)[:200]
+        }
+        return {
+            "status": "partial_success",
+            "message": "Bedrock est connecté mais rate limit atteint",
+            "details": result
+        }
+    except Exception as e:
+        result["connection_test"] = {
+            "status": "error",
+            "model": test_model,
+            "error": str(e)[:300]
+        }
+        return {
+            "status": "error",
+            "message": "Erreur lors du test de connexion Bedrock",
+            "details": result
+        }
+
 
 app.include_router(api_router, prefix="/api")
 

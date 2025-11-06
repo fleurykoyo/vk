@@ -131,6 +131,7 @@ class ToolManager:
             ('sb_presentation_tool', SandboxPresentationTool, {'project_id': self.project_id, 'thread_manager': self.thread_manager}),
             ('sb_upload_file_tool', SandboxUploadFileTool, {'project_id': self.project_id, 'thread_manager': self.thread_manager}),
             ('sb_docs_tool', SandboxDocsTool, {'project_id': self.project_id, 'thread_manager': self.thread_manager}),
+            ('sb_document_parser_tool', SandboxDocumentParserTool, {'project_id': self.project_id, 'thread_manager': self.thread_manager}),
         ]
         
         for tool_name, tool_class, kwargs in sandbox_tools:

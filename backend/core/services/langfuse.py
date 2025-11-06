@@ -111,6 +111,12 @@ if enabled:
                 def __init__(self): 
                     self.id = "mock-trace-id"
                 
+                def span(self, **kwargs):
+                    return MockSpan()
+                
+                def generation(self, **kwargs):
+                    return MockGeneration()
+                
                 def __getattr__(self, name):
                     # Return a no-op function for any method call
                     def no_op(*args, **kwargs):
@@ -128,6 +134,10 @@ if enabled:
             class MockSpan:
                 def __init__(self): 
                     self.id = "mock-span-id"
+                
+                def end(self, *args, **kwargs):
+                    # No-op method for ending spans
+                    pass
                 
                 def __getattr__(self, name):
                     # Return a no-op function for any method call
@@ -155,6 +165,12 @@ else:
         def __init__(self): 
             self.id = "mock-trace-id"
         
+        def span(self, **kwargs):
+            return MockSpan()
+        
+        def generation(self, **kwargs):
+            return MockGeneration()
+        
         def __getattr__(self, name):
             # Return a no-op function for any method call
             def no_op(*args, **kwargs):
@@ -172,6 +188,10 @@ else:
     class MockSpan:
         def __init__(self): 
             self.id = "mock-span-id"
+        
+        def end(self, *args, **kwargs):
+            # No-op method for ending spans
+            pass
         
         def __getattr__(self, name):
             # Return a no-op function for any method call

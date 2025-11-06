@@ -1,0 +1,47 @@
+# Configuration Istio ServiceEntry pour définir les services externes
+# Appliquez avec: kubectl apply -f daytona-service-entry.yaml
+
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-http
+  namespace: daytona  # Remplacez par votre namespace
+spec:
+  hosts:
+  # Domaines communs autorisés
+  - "*.google.com"
+  - "*.github.com"
+  - "*.stackoverflow.com"
+  - "*.wikipedia.org"
+  - "*.reddit.com"
+  - "*.twitter.com"
+  - "*.youtube.com"
+  # Ou autoriser tous les domaines (moins sécurisé)
+  # - "*"
+  ports:
+  - number: 80
+    name: http
+    protocol: HTTP
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+
+---
+# ServiceEntry pour HTTPS uniquement
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-https
+  namespace: daytona
+spec:
+  hosts:
+  - "*"  # Autoriser tous les domaines HTTPS
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+

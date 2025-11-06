@@ -85,6 +85,11 @@ def setup_provider_router(openai_compatible_api_key: str = None, openai_compatib
     config_openai_key = getattr(config, 'OPENAI_COMPATIBLE_API_KEY', None) if config else None
     config_openai_base = getattr(config, 'OPENAI_COMPATIBLE_API_BASE', None) if config else None
     
+    # Check if Bedrock is available (for fallbacks)
+    bedrock_available = bool(getattr(config, 'AWS_BEARER_TOKEN_BEDROCK', None) if config else None)
+    from core.utils.config import EnvMode
+    is_local = config and config.ENV_MODE == EnvMode.LOCAL
+    
     model_list = [
         {
             "model_name": "openai-compatible/*", # support OpenAI-Compatible LLM provider
@@ -101,6 +106,52 @@ def setup_provider_router(openai_compatible_api_key: str = None, openai_compatib
             },
         },
     ]
+    
+    # Explicitly add Anthropic and Bedrock models to model_list for fallback support
+    if is_local and bedrock_available:
+        # Add Anthropic API direct models
+        model_list.extend([
+            {
+                "model_name": "anthropic/claude-haiku-4-5",
+                "litellm_params": {
+                    "model": "anthropic/claude-haiku-4-5",
+                },
+            },
+            {
+                "model_name": "anthropic/claude-sonnet-4-5-20250929",
+                "litellm_params": {
+                    "model": "anthropic/claude-sonnet-4-5-20250929",
+                },
+            },
+            {
+                "model_name": "anthropic/claude-sonnet-4-20250514",
+                "litellm_params": {
+                    "model": "anthropic/claude-sonnet-4-20250514",
+                },
+            },
+        ])
+        # Add Bedrock models
+        model_list.extend([
+            {
+                "model_name": "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/heol2zyy5v48",
+                "litellm_params": {
+                    "model": "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/heol2zyy5v48",
+                },
+            },
+            {
+                "model_name": "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/tyj1ks3nj9qf",
+                "litellm_params": {
+                    "model": "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/tyj1ks3nj9qf",
+                },
+            },
+            {
+                "model_name": "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/few7z4l830xh",
+                "litellm_params": {
+                    "model": "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/few7z4l830xh",
+                },
+            },
+        ])
+        logger.info("Added explicit Anthropic and Bedrock models to model_list for fallback support")
     
     fallbacks = [
         # MAP-tagged Haiku 4.5 (default) -> Sonnet 4 -> Sonnet 4.5
@@ -125,13 +176,44 @@ def setup_provider_router(openai_compatible_api_key: str = None, openai_compatib
         }
     ]
     
+    # Add fallbacks from Anthropic API direct to Bedrock (for local mode when rate limited)
+    if is_local and bedrock_available:
+        fallbacks.extend([
+            # Anthropic API direct Haiku 4.5 -> Bedrock Haiku 4.5 -> Bedrock Sonnet 4 -> Bedrock Sonnet 4.5
+            {
+                "anthropic/claude-haiku-4-5": [
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/heol2zyy5v48",
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/tyj1ks3nj9qf",
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/few7z4l830xh",
+                ]
+            },
+            # Anthropic API direct Sonnet 4.5 -> Bedrock Sonnet 4.5 -> Bedrock Sonnet 4 -> Bedrock Haiku 4.5
+            {
+                "anthropic/claude-sonnet-4-5-20250929": [
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/few7z4l830xh",
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/tyj1ks3nj9qf",
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/heol2zyy5v48",
+                ]
+            },
+            # Anthropic API direct Sonnet 4 -> Bedrock Sonnet 4 -> Bedrock Haiku 4.5
+            {
+                "anthropic/claude-sonnet-4-20250514": [
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/tyj1ks3nj9qf",
+                    "bedrock/converse/arn:aws:bedrock:us-west-2:935064898258:application-inference-profile/heol2zyy5v48",
+                ]
+            },
+        ])
+        logger.info(f"Added Anthropic API -> Bedrock fallbacks for local mode (Bedrock available: {bedrock_available})")
+    elif is_local and not bedrock_available:
+        logger.warning("Local mode detected but Bedrock not configured - Anthropic API rate limits will not have fallbacks")
+    
     provider_router = Router(
         model_list=model_list,
         retry_after=15,
         fallbacks=fallbacks,
     )
     
-    logger.info(f"Configured LiteLLM Router with {len(fallbacks)} Bedrock-only fallback rules")
+    logger.info(f"Configured LiteLLM Router with {len(fallbacks)} fallback rules")
 
 def _configure_openai_compatible(params: Dict[str, Any], model_name: str, api_key: Optional[str], api_base: Optional[str]) -> None:
     """Configure OpenAI-compatible provider setup."""

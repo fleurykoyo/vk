@@ -1,0 +1,21 @@
+# Configuration Istio AuthorizationPolicy pour autoriser l'accès Internet
+# Appliquez avec: kubectl apply -f daytona-istio-authorization.yaml
+
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-internet-access
+  namespace: daytona  # Remplacez par votre namespace
+spec:
+  selector:
+    matchLabels:
+      app: daytona-sandbox  # Remplacez par le label de vos sandbox
+  action: ALLOW
+  rules:
+  # Autoriser toutes les connexions sortantes
+  - to:
+    - operation:
+        hosts: ["*"]  # Autoriser tous les hosts externes
+        methods: ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"]
+        paths: ["*"]
+

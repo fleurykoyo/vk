@@ -69,7 +69,29 @@ class BrowserAutomation {
                             "--no-sandbox",
                             "--disable-setuid-sandbox",
                             "--disable-dev-shm-usage",
-                            "--disable-gpu"
+                            "--disable-gpu",
+                            "--ignore-certificate-errors",
+                            "--ignore-ssl-errors",
+                            "--ignore-certificate-errors-spki-list",
+                            "--disable-web-security",
+                            "--allow-running-insecure-content",
+                            "--disable-features=IsolateOrigins,site-per-process",
+                            "--disable-site-isolation-trials",
+                            "--disable-blink-features=AutomationControlled",
+                            "--no-first-run",
+                            "--no-default-browser-check",
+                            "--disable-default-apps",
+                            "--disable-popup-blocking",
+                            "--disable-translate",
+                            "--disable-background-networking",
+                            "--disable-sync",
+                            "--metrics-recording-only",
+                            "--mute-audio",
+                            "--no-pings",
+                            "--disable-background-timer-throttling",
+                            "--disable-renderer-backgrounding",
+                            "--disable-backgrounding-occluded-windows",
+                            "--disable-ipc-flooding-protection"
                         ]
                     }
                 });
@@ -97,7 +119,41 @@ class BrowserAutomation {
                     }
                 }
 
-                await this.page.goto('https://www.google.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+                // Test internet connectivity with a simple navigation
+                // Try HTTP first (more likely to work if HTTPS is blocked)
+                try {
+                    await this.page.goto('http://www.google.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                } catch (initError: any) {
+                    const errorMessage = initError?.message || String(initError);
+                    console.error("Browser initialization navigation to HTTP failed, trying HTTPS:", errorMessage);
+                    
+                    // If HTTP fails, try HTTPS
+                    try {
+                        await this.page.goto('https://www.google.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    } catch (httpsError: any) {
+                        const httpsErrorMessage = httpsError?.message || String(httpsError);
+                        console.error("Browser initialization navigation to HTTPS also failed:", httpsErrorMessage);
+                        
+                        // If both fail, provide helpful message but still mark as initialized
+                        // The browser is initialized even if network is not available
+                        if (httpsErrorMessage.includes('net::ERR_NAME_NOT_RESOLVED') || 
+                            httpsErrorMessage.includes('DNS_PROBE_FINISHED_NXDOMAIN') ||
+                            httpsErrorMessage.includes('net::ERR_INTERNET_DISCONNECTED') ||
+                            httpsErrorMessage.includes('timeout') ||
+                            httpsErrorMessage.includes('ERR_CONNECTION_RESET') ||
+                            httpsErrorMessage.includes('ERR_CONNECTION_REFUSED')) {
+                            console.warn("Browser initialized but internet connectivity test failed. The sandbox may have network restrictions.");
+                            return {
+                                status: "healthy",
+                                message: "Browser initialized (but internet connectivity test failed - check sandbox network configuration and firewall/proxy settings)"
+                            }
+                        } else {
+                            // For other errors, still initialize but log the warning
+                            console.warn("Browser initialization navigation failed but continuing:", httpsErrorMessage);
+                        }
+                    }
+                }
+                
                 return {
                     status: "healthy",
                     message: "Browser initialized"
@@ -176,7 +232,32 @@ class BrowserAutomation {
         try {
             if (this.page && this.browserInitialized) {
                 const { url } = req.body;
-                await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                
+                // Check network connectivity first
+                try {
+                    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                } catch (navigationError: any) {
+                    const errorMessage = navigationError?.message || String(navigationError);
+                    
+                    // Provide helpful error messages for common network issues
+                    if (errorMessage.includes('net::ERR_NAME_NOT_RESOLVED') || 
+                        errorMessage.includes('DNS_PROBE_FINISHED_NXDOMAIN') ||
+                        errorMessage.includes('net::ERR_INTERNET_DISCONNECTED')) {
+                        throw new Error(`Network connectivity issue: The sandbox cannot access the internet. Please check if the sandbox has internet access configured. Error: ${errorMessage}`);
+                    } else if (errorMessage.includes('timeout') || errorMessage.includes('Navigation timeout')) {
+                        throw new Error(`Navigation timeout: The website took too long to load. This could indicate a network issue or the website is down. Error: ${errorMessage}`);
+                    } else if (errorMessage.includes('net::ERR_CONNECTION_REFUSED')) {
+                        throw new Error(`Connection refused: The website refused the connection. This could be a firewall or network configuration issue. Error: ${errorMessage}`);
+                    } else if (errorMessage.includes('ERR_CONNECTION_RESET') || 
+                               errorMessage.includes('net::ERR_CONNECTION_RESET')) {
+                        throw new Error(`Connection reset: The connection was reset by the server or a proxy. This often indicates that a network proxy (like Envoy/Istio) is blocking external internet access. Please check your Daytona network security settings to allow internet access. Error: ${errorMessage}`);
+                    } else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+                        throw new Error(`Access forbidden: The request was blocked by a network proxy (likely Envoy). Your Daytona sandbox appears to have network restrictions that block external internet access. Please contact your administrator to configure network security rules to allow internet access. Error: ${errorMessage}`);
+                    } else {
+                        throw navigationError;
+                    }
+                }
+                
                 const page_info = await this.get_stagehand_state();
                 const result: BrowserActionResult = {
                     success: true,
@@ -196,16 +277,17 @@ class BrowserAutomation {
                     title: ""
                 } as BrowserActionResult)
             }
-        } catch (error) {
-            console.error(error);
+        } catch (error: any) {
+            console.error("Navigation error:", error);
             const page_info = await this.get_stagehand_state();
+            const errorMessage = error?.message || String(error);
             res.status(500).json({
                 success: false,
-                message: "Failed to navigate to " + req.body.url,
+                message: "Failed to navigate to " + (req.body?.url || 'unknown URL'),
                 url: page_info.url,
                 title: page_info.title,
                 screenshot_base64: page_info.screenshot_base64,
-                error
+                error: errorMessage
             })
         }
     }

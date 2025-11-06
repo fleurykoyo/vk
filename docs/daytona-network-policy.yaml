@@ -1,0 +1,38 @@
+# Configuration NetworkPolicy pour autoriser l'accès Internet
+# Appliquez avec: kubectl apply -f daytona-network-policy.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress-internet
+  namespace: daytona  # Remplacez par votre namespace
+spec:
+  podSelector:
+    matchLabels:
+      app: daytona-sandbox  # Remplacez par le label de vos sandbox
+  policyTypes:
+  - Egress
+  egress:
+  # Autoriser le trafic DNS
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Autoriser le trafic HTTP/HTTPS sortant vers Internet
+  - to: []  # Empty to selector permet toutes les destinations
+    ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+  # Autoriser d'autres ports si nécessaire
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8443
+

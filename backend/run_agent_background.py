@@ -154,7 +154,12 @@ async def run_agent_background(
             logger.error(f"Error in stop signal checker for {agent_run_id}: {e}", exc_info=True)
             stop_signal_received = True # Stop the run if the checker fails
 
-    trace = langfuse.trace(name="agent_run", id=agent_run_id, session_id=thread_id, metadata={"project_id": project_id, "instance_id": instance_id})
+    trace = None
+    try:
+        trace = langfuse.trace(name="agent_run", id=agent_run_id, session_id=thread_id, metadata={"project_id": project_id, "instance_id": instance_id})
+    except Exception as trace_err:
+        logger.warning(f"Failed to create Langfuse trace for agent run {agent_run_id}: {trace_err}")
+        trace = None
 
     try:
         # Setup Pub/Sub listener for control signals
@@ -189,7 +194,8 @@ async def run_agent_background(
             if stop_signal_received:
                 logger.debug(f"Agent run {agent_run_id} stopped by signal.")
                 final_status = "stopped"
-                trace.span(name="agent_run_stopped").end(status_message="agent_run_stopped", level="WARNING")
+                if trace:
+                    trace.span(name="agent_run_stopped").end(status_message="agent_run_stopped", level="WARNING")
                 break
 
             # Store response in Redis list and publish notification
@@ -217,7 +223,8 @@ async def run_agent_background(
              duration = (datetime.now(timezone.utc) - start_time).total_seconds()
              logger.info(f"Agent run {agent_run_id} completed normally (duration: {duration:.2f}s, responses: {total_responses})")
              completion_message = {"type": "status", "status": "completed", "message": "Agent run completed successfully"}
-             trace.span(name="agent_run_completed").end(status_message="agent_run_completed")
+             if trace:
+                 trace.span(name="agent_run_completed").end(status_message="agent_run_completed")
              await redis.rpush(response_list_key, json.dumps(completion_message))
              await redis.publish(response_channel, "new") # Notify about the completion message
 
@@ -243,7 +250,11 @@ async def run_agent_background(
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
         logger.error(f"Error in agent run {agent_run_id} after {duration:.2f}s: {error_message}\n{traceback_str} (Instance: {instance_id})")
         final_status = "failed"
-        trace.span(name="agent_run_failed").end(status_message=error_message, level="ERROR")
+        if trace:
+            try:
+                trace.span(name="agent_run_failed").end(status_message=error_message, level="ERROR")
+            except Exception as trace_err:
+                logger.warning(f"Failed to end Langfuse trace span for failed run {agent_run_id}: {trace_err}")
 
         # Push error message to Redis list
         error_response = {"type": "status", "status": "error", "message": error_message}
